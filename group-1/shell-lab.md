@@ -481,7 +481,7 @@ void do_bgfg(char **argv)
     kill(-(job->pid), SIGCONT);
     job->state = state;    //进程的状态信息可能发生改变，需要将新的state赋值给它
     if (state == FG) {
-        waitfg(job->pid);
+        waitfg(job->pid); //转为等待前台结束状态
     }
     else {
         printf("[%d] (%d) %s",job->jid, job->pid, job->cmdline);
@@ -500,7 +500,7 @@ void waitfg(pid_t pid)
 }
 ```
 
-该方法检测前台pid是否为0(即shell程序),若不为0则执行_pause_函数，等待子进程发送信号之后，再回到进程。然而此方法存在竞争(race)问题，若子进程在while循环判断之后、_pause_函数运行之前结束，那么pause将永久睡眠。
+该方法检测前台pid是否为0(即shell程序),若不为0则执行_pause_函数，等待子进程发送信号之后，再回到进程。然而此方法存在竞争(race)问题，即若子进程在while循环判断之后、_pause_函数运行之前结束，那么pause将永久睡眠。
 
 另一个选择是用_sleep_函数代替_pause函数。_
 
@@ -513,7 +513,7 @@ void waitfg(pid_t pid)
 }
 ```
 
-然而这种方式太慢。可以采用_sigsuspend函数_来完成_waitfg_函数：
+然而这种方式太慢。可以采用前文_sigsuspend函数_来完成_waitfg_函数：
 
 ```
 void waitfg(pid_t pid)
@@ -548,9 +548,9 @@ void eval(char *cmdline)
     bg = parseline(buf, argv);
     state = bg ? BG : FG;
     if (!builtin_cmd(argv)) {
-        sigprocmask(SIG_BLOCK, &msak_one, &prev_all); // Block SIGCHLD
+        sigprocmask(SIG_BLOCK, &msak_one, &prev_all); // 阻塞SIGCHLD信号，避免Race
         if ((pid = Fork()) == 0) {
-            sigprocmask(SIG_SETMASK, &prev_all, NULL); // Unblock child process
+            sigprocmask(SIG_SETMASK, &prev_all, NULL); // 子进程解除阻塞
             setpgid(0, 0);
             if (execv(argv[0], argv) == -1) {
                 exit(0);
@@ -559,7 +559,7 @@ void eval(char *cmdline)
         if (state == FG) {
             sigprocmask(SIG_BLOCK, &mask_all, &prev_all);
             addjob(jobs, pid, state, cmdline);
-            sigprocmask(SIG_SETMASK, &prev_all, NULL);
+            sigprocmask(SIG_SETMASK, &prev_all, NULL);//添加完毕后再解除阻塞
             waitfg(pid);
         }
         else {
@@ -572,7 +572,7 @@ void eval(char *cmdline)
 }
 ```
 
-最后，我们只需要完成三个信号处理函数即可，难度不大，参考书中示范即可完成。注意点在于保护全局变量errno,同时注意信号不排队的特点，通过信号阻塞来保证处理到全部信号。详细内容可参考书上的8.5.5部分。
+最后，我们只需要完成三个信号处理函数即可，难度不大，参考书中示范即可完成。注意点在于保护全局变量errno,同时注意信号不排队的特点（即收到一个信号处理时后来的信号会被直接丢弃），通过信号阻塞来保证处理到全部信号。详细内容可参考书上的8.5.5部分。
 
 ```
 void sigchld_handler(int sig) 
@@ -584,7 +584,7 @@ void sigchld_handler(int sig)
     sigset_t mask_all, prev;
     sigfillset(&mask_all);
     while ((pid = waitpid(-1, &status, WNOHANG|WUNTRACED)) != 0) {
-        sigprocmask(SIG_BLOCK, &mask_all, &prev);
+        sigprocmask(SIG_BLOCK, &mask_all, &prev);//阻塞信号
         if (WIFEXITED(status)) {
             deletejob(jobs, pid);
         }
@@ -597,7 +597,7 @@ void sigchld_handler(int sig)
             job = getjobpid(jobs, pid);
             job->state = ST;
         }
-        sigprocmask(SIG_SETMASK, &prev, NULL);
+        sigprocmask(SIG_SETMASK, &prev, NULL);//处理完毕后解除阻塞
     }
     errno = olderrno;
 }
@@ -622,7 +622,7 @@ void sigint_handler(int sig)
     }
     errno = olderrno;
 }
-
+//两个函数差不多
 /*
  * sigtstp_handler - The kernel sends a SIGTSTP to the shell whenever
  *     the user types ctrl-z at the keyboard. Catch it and suspend the
