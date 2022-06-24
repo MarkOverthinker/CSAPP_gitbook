@@ -283,7 +283,7 @@ void sigint_handler(int sig);
 
 源自书中524-526代码示例及实验包中代码（8.4.6 利用fork和execve运行程序）
 
-首先是简单shell 的例程。shell 打印一个命令行提示符，等待用户在stdin输入命令,再对命令求值。
+首先是shell 的例程。shell 打印一个命令行提示符，等待用户在stdin输入命令,再对命令求值。
 
 ```
 int main(int argc, char **argv) 
